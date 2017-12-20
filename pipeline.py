@@ -131,18 +131,9 @@ def color_gradient_frames(frames, s_thresh=(125, 255), sx_thresh=(10, 100), sobe
         printProgressBar(i+1, len_frames, 'Pipeline frames')
     return color_binaries
 
-def birds_eye_frames(frames):
-    import cv2
+def get_perspective_transform(height = 720, width = 1280):
     import numpy as np
-    from util import printProgressBar
-
-    birds_eye_frames = []
-    len_frames = len(frames)
-    # Initial call to print 0% progress
-    printProgressBar(0, len_frames, 'Birds eye frames')
-
-    # Grab the image shape
-    height, width = frames[0].shape[0], frames[0].shape[1]
+    import cv2
 
     # Source points - defined area of lane line edges
     src_offset_width_bottom = 235
@@ -161,6 +152,17 @@ def birds_eye_frames(frames):
 
     # Use cv2.getPerspectiveTransform() to get M, the transform matrix
     M = cv2.getPerspectiveTransform(np.float32(src), dst)
+    return M, width, height, src
+
+def birds_eye_frames(frames, M, width, height, src):
+    import cv2
+    import numpy as np
+    from util import printProgressBar
+
+    birds_eye_frames = []
+    len_frames = len(frames)
+    # Initial call to print 0% progress
+    printProgressBar(0, len_frames, 'Birds eye frames')
 
     for i in range(len_frames):
         frame = frames[i]
@@ -169,7 +171,7 @@ def birds_eye_frames(frames):
         pts = np.array(src, np.int32)
         pts = pts.reshape((-1,1,2))
         cv2.polylines(frame,[pts],True,(255,0,0))
-        birds_eye_frames.append(frame)
+        #birds_eye_frames.append(frame)
 
         # Use cv2.warpPerspective() to warp the image to a top-down view
         birds_eye_frame = cv2.warpPerspective(frame, M, (width, height))
@@ -190,5 +192,7 @@ frames, fps = load_frames("project_video.mp4", end_frame = 25 * 2)
 #frames, fps = load_frames("project_video.mp4", start_frame = 25 * 15, end_frame = 25 * 17)
 undistorted_frames = undistort_frames(frames)
 clr_gradient_frames = color_gradient_frames(undistorted_frames)
-brd_eye_frames = birds_eye_frames(clr_gradient_frames)
+M, width, height, src = get_perspective_transform()
+brd_eye_frames = birds_eye_frames(clr_gradient_frames, M, width, height, src)
+
 save_frames_to_video(brd_eye_frames, fps, "output.mp4")
