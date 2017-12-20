@@ -89,6 +89,46 @@ def undistort_frames(frames):
         printProgressBar(i+1, len_frames, 'Undistort frames')
     return undistorted_frames
 
+def color_gradient_frames(frames, s_thresh=(125, 255), sx_thresh=(10, 100), sobel_kernel = 3):
+    import cv2
+    import numpy as np
+    from util import printProgressBar
+
+    color_binaries = []
+    len_frames = len(frames)
+    # Initial call to print 0% progress
+    printProgressBar(0, len_frames, 'Pipeline frames')
+    for i in range(len_frames):
+        img = np.copy(frames[i])
+
+        # Convert to HLS colorspace
+        hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS).astype(np.float)
+        l_channel = hls[:,:,1]
+        s_channel = hls[:,:,2]
+
+        # Sobelx - takes the derivate in x, absolute value, then rescale
+        sobelx = cv2.Sobel(l_channel, cv2.CV_64F, 1, 0, ksize = sobel_kernel)
+        abs_sobelx = np.absolute(sobelx)
+        scaled_sobelx = np.uint8(255*abs_sobelx/np.max(abs_sobelx))
+
+        # Threshold x gradient
+        sxbinary = np.zeros_like(scaled_sobelx)
+        sxbinary[(scaled_sobelx >= sx_thresh[0]) & (scaled_sobelx <= sx_thresh[1])] = 1
+
+        # Threshold color channel
+        s_binary = np.zeros_like(s_channel)
+        s_binary[(s_channel >= s_thresh[0]) & (s_channel <= s_thresh[1])] = 1
+
+        # If two of the three are activated, activate in the binary image
+        combined_binary = np.zeros_like(sxbinary)
+        combined_binary[(sxbinary == 1) | (s_binary == 1)] = 1
+
+        color_binary = np.dstack(( np.zeros_like(sxbinary), sxbinary, s_binary)) * 255
+        color_binaries.append(color_binary)
+        # Update Progress Bar
+        printProgressBar(i+1, len_frames, 'Pipeline frames')
+    return color_binaries
+
 def save_frames_to_video(frames, fps, output_path = "output.mp4"):
     from moviepy.editor import ImageSequenceClip
     clip = ImageSequenceClip(frames, fps=fps)
@@ -96,5 +136,6 @@ def save_frames_to_video(frames, fps, output_path = "output.mp4"):
 
 mtx, dist = calc_distortion(debug = False)
 frames, fps = load_frames("project_video.mp4", end_frame = 50)
-undistored_frames = undistort_frames(frames)
-save_frames_to_video(frames, fps, "output.mp4")
+undistorted_frames = undistort_frames(frames)
+clr_gradient_frames = color_gradient_frames(undistorted_frames)
+save_frames_to_video(clr_gradient_frames, fps, "output.mp4")
