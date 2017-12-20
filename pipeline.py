@@ -61,17 +61,19 @@ def load_frames(video_path = "project_video.mp4", start_frame = None, end_frame 
 
     len_frames = int(input.fps * input.duration)
     len_frames = len_frames if end_frame == None or end_frame > len_frames else end_frame
-    i = 0 if start_frame == None else start_frame
+    i = 0
     # Initial call to print 0% progress
     printProgressBar(0, len_frames, 'Loading frames')
     frames = []
     for frame in input.iter_frames():
-        frames.append(frame)
+        if start_frame == None or i > start_frame:
+            frames.append(frame)
+            # Update Progress Bar
+            printProgressBar(i+1, len_frames, 'Loading frames')
+            if i - 1 >= len_frames:
+                break
         i = i+1
-        # Update Progress Bar
-        printProgressBar(i, len_frames, 'Loading frames')
-        if len_frames <= i:
-            break
+
     return frames, input.fps
 
 def undistort_frames(frames):
@@ -129,13 +131,64 @@ def color_gradient_frames(frames, s_thresh=(125, 255), sx_thresh=(10, 100), sobe
         printProgressBar(i+1, len_frames, 'Pipeline frames')
     return color_binaries
 
+def birds_eye_frames(frames):
+    import cv2
+    import numpy as np
+    from util import printProgressBar
+
+    birds_eye_frames = []
+    len_frames = len(frames)
+    # Initial call to print 0% progress
+    printProgressBar(0, len_frames, 'Birds eye frames')
+
+    # Grab the image shape
+    height, width = frames[0].shape[0], frames[0].shape[1]
+
+    # Source points - defined area of lane line edges
+    src_offset_width_bottom = 235
+    src_offset_width_top = 45
+    src_offset_height = 90
+    bottom_left = [src_offset_width_bottom, height]
+    bottom_right = [width - src_offset_width_bottom + 100, height]
+    top_right = [width / 2 + src_offset_width_top, height / 2 + src_offset_height]
+    top_left = [width / 2 - src_offset_width_top, height / 2 + src_offset_height]
+    src = [bottom_left, bottom_right, top_right, top_left]
+
+    # 4 destination points to transfer
+    offset = 300 # offset for dst points
+    dst = np.float32([[offset, height],[width-offset, height],
+                      [width-offset, 0],[offset, 0]])
+
+    # Use cv2.getPerspectiveTransform() to get M, the transform matrix
+    M = cv2.getPerspectiveTransform(np.float32(src), dst)
+
+    for i in range(len_frames):
+        frame = frames[i]
+
+        # Draw red rectangle on frame to show src for transformation
+        pts = np.array(src, np.int32)
+        pts = pts.reshape((-1,1,2))
+        cv2.polylines(frame,[pts],True,(255,0,0))
+        birds_eye_frames.append(frame)
+
+        # Use cv2.warpPerspective() to warp the image to a top-down view
+        birds_eye_frame = cv2.warpPerspective(frame, M, (width, height))
+        birds_eye_frames.append(birds_eye_frame)
+
+        # Update Progress Bar
+        printProgressBar(i+1, len_frames, 'Birds eye frames')
+
+    return birds_eye_frames
+
 def save_frames_to_video(frames, fps, output_path = "output.mp4"):
     from moviepy.editor import ImageSequenceClip
     clip = ImageSequenceClip(frames, fps=fps)
     clip.write_videofile(output_path, audio=False)
 
 mtx, dist = calc_distortion(debug = False)
-frames, fps = load_frames("project_video.mp4", end_frame = 50)
+frames, fps = load_frames("project_video.mp4", end_frame = 25 * 2)
+#frames, fps = load_frames("project_video.mp4", start_frame = 25 * 15, end_frame = 25 * 17)
 undistorted_frames = undistort_frames(frames)
 clr_gradient_frames = color_gradient_frames(undistorted_frames)
-save_frames_to_video(clr_gradient_frames, fps, "output.mp4")
+brd_eye_frames = birds_eye_frames(clr_gradient_frames)
+save_frames_to_video(brd_eye_frames, fps, "output.mp4")
