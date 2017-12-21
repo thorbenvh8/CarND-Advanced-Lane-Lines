@@ -136,8 +136,8 @@ def get_perspective_transform(height = 720, width = 1280):
     import cv2
 
     # Source points - defined area of lane line edges
-    src_offset_width_bottom = 235
-    src_offset_width_top = 45
+    src_offset_width_bottom = 235 - 300
+    src_offset_width_top = 45 + 30
     src_offset_height = 90
     bottom_left = [src_offset_width_bottom, height]
     bottom_right = [width - src_offset_width_bottom + 100, height]
@@ -171,7 +171,7 @@ def birds_eye_frames(frames, M, width, height, src):
         pts = np.array(src, np.int32)
         pts = pts.reshape((-1,1,2))
         cv2.polylines(frame,[pts],True,(255,0,0))
-        #birds_eye_frames.append(frame)
+        birds_eye_frames.append(frame)
 
         # Use cv2.warpPerspective() to warp the image to a top-down view
         birds_eye_frame = cv2.warpPerspective(frame, M, (width, height))
