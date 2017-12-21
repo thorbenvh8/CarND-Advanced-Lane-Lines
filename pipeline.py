@@ -96,6 +96,7 @@ def color_gradient_frames(frames, s_thresh=(125, 255), sx_thresh=(10, 100), sobe
     import numpy as np
     from util import printProgressBar
 
+    combined_binaries = []
     color_binaries = []
     len_frames = len(frames)
     # Initial call to print 0% progress
@@ -124,12 +125,13 @@ def color_gradient_frames(frames, s_thresh=(125, 255), sx_thresh=(10, 100), sobe
         # If two of the three are activated, activate in the binary image
         combined_binary = np.zeros_like(sxbinary)
         combined_binary[(sxbinary == 1) | (s_binary == 1)] = 1
+        combined_binaries.append(combined_binary)
 
         color_binary = np.dstack(( np.zeros_like(sxbinary), sxbinary, s_binary)) * 255
         color_binaries.append(color_binary)
         # Update Progress Bar
         printProgressBar(i+1, len_frames, 'Pipeline frames')
-    return color_binaries
+    return combined_binaries, color_binaries
 
 def get_perspective_transform(height = 720, width = 1280):
     import numpy as np
@@ -154,17 +156,19 @@ def get_perspective_transform(height = 720, width = 1280):
     M = cv2.getPerspectiveTransform(np.float32(src), dst)
     return M, width, height, src
 
-def birds_eye_frames(frames, M, width, height, src):
+def birds_eye_frames(bin_frames, frames, M, width, height, src):
     import cv2
     import numpy as np
     from util import printProgressBar
 
+    birds_eye_bin_frames = []
     birds_eye_frames = []
     len_frames = len(frames)
     # Initial call to print 0% progress
     printProgressBar(0, len_frames, 'Birds eye frames')
 
     for i in range(len_frames):
+        bin_frame = bin_frames[i]
         frame = frames[i]
 
         # Draw red rectangle on frame to show src for transformation
@@ -174,13 +178,142 @@ def birds_eye_frames(frames, M, width, height, src):
         birds_eye_frames.append(frame)
 
         # Use cv2.warpPerspective() to warp the image to a top-down view
+        birds_eye_bin_frame = cv2.warpPerspective(bin_frame, M, (width, height))
+        birds_eye_bin_frames.append(birds_eye_bin_frame)
         birds_eye_frame = cv2.warpPerspective(frame, M, (width, height))
         birds_eye_frames.append(birds_eye_frame)
 
         # Update Progress Bar
         printProgressBar(i+1, len_frames, 'Birds eye frames')
 
-    return birds_eye_frames
+    return birds_eye_bin_frames, birds_eye_frames
+
+def find_lanes(bin_frames):
+    from util import printProgressBar
+    import numpy as np
+    import cv2
+
+    found_lanes_frames = []
+
+    len_bin_frames = len(bin_frames)
+    # Initial call to print 0% progress
+    printProgressBar(0, len_bin_frames, 'Finding lane frames')
+
+    for i in range(len_bin_frames):
+        bin_frame = bin_frames[i]
+
+        # Assuming you have created a warped binary image called "bin_frame"
+        # Take a histogram of the bottom half of the image
+        histogram = np.sum(bin_frame[int(bin_frame.shape[0]/2):,:], axis=0)
+        # Create an output image to draw on and  visualize the result
+        out_img = np.dstack((bin_frame, bin_frame, bin_frame))*255
+        # Find the peak of the left and right halves of the histogram
+        # These will be the starting point for the left and right lines
+        midpoint = np.int(histogram.shape[0]/2)
+        # Same offset we use in the dst for M, only look for the line in the transformed area
+        offset = 300
+        leftx_base = np.argmax(histogram[offset:midpoint]) + offset
+        rightx_base = np.argmax(histogram[midpoint:histogram.shape[0]-offset]) + midpoint
+        # Choose the number of sliding windows
+        nwindows = 9
+        # Set height of windows
+        window_height = np.int(bin_frame.shape[0]/nwindows)
+        # Identify the x and y positions of all nonzero pixels in the image
+        nonzero = bin_frame.nonzero()
+        nonzeroy = np.array(nonzero[0])
+        nonzerox = np.array(nonzero[1])
+        # Current positions to be updated for each window
+        leftx_current = leftx_base
+        rightx_current = rightx_base
+        # Set the width of the windows +/- margin
+        margin = 100
+        # Set minimum number of pixels found to recenter window
+        minpix = 50
+        # Create empty lists to receive left and right lane pixel indices
+        left_lane_inds = []
+        right_lane_inds = []
+
+        # Step through the windows one by one
+        for window in range(nwindows):
+            # Identify window boundaries in x and y (and right and left)
+            win_y_low = bin_frame.shape[0] - (window+1)*window_height
+            win_y_high = bin_frame.shape[0] - window*window_height
+            win_xleft_low = leftx_current - margin
+            win_xleft_high = leftx_current + margin
+            win_xright_low = rightx_current - margin
+            win_xright_high = rightx_current + margin
+            # Draw the windows on the visualization image
+            cv2.rectangle(out_img,(win_xleft_low,win_y_low),(win_xleft_high,win_y_high),
+            (0,255,0), 2)
+            cv2.rectangle(out_img,(win_xright_low,win_y_low),(win_xright_high,win_y_high),
+            (0,255,0), 2)
+            # Identify the nonzero pixels in x and y within the window
+            good_left_inds = ((nonzeroy >= win_y_low) & (nonzeroy < win_y_high) &
+            (nonzerox >= win_xleft_low) &  (nonzerox < win_xleft_high)).nonzero()[0]
+            good_right_inds = ((nonzeroy >= win_y_low) & (nonzeroy < win_y_high) &
+            (nonzerox >= win_xright_low) &  (nonzerox < win_xright_high)).nonzero()[0]
+            # Append these indices to the lists
+            left_lane_inds.append(good_left_inds)
+            right_lane_inds.append(good_right_inds)
+            # If you found > minpix pixels, recenter next window on their mean position
+            if len(good_left_inds) > minpix:
+                leftx_current = np.int(np.mean(nonzerox[good_left_inds]))
+            if len(good_right_inds) > minpix:
+                rightx_current = np.int(np.mean(nonzerox[good_right_inds]))
+
+        # Concatenate the arrays of indices
+        left_lane_inds = np.concatenate(left_lane_inds)
+        right_lane_inds = np.concatenate(right_lane_inds)
+
+        # Extract left and right line pixel positions
+        leftx = nonzerox[left_lane_inds]
+        lefty = nonzeroy[left_lane_inds]
+        rightx = nonzerox[right_lane_inds]
+        righty = nonzeroy[right_lane_inds]
+
+        # Fit a second order polynomial to each
+        left_fit = np.polyfit(lefty, leftx, 2)
+        right_fit = np.polyfit(righty, rightx, 2)
+
+        ploty = np.linspace(0, bin_frame.shape[0]-1, bin_frame.shape[0] )
+        left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
+        right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
+
+        out_img[nonzeroy[left_lane_inds], nonzerox[left_lane_inds]] = [255, 0, 0]
+        out_img[nonzeroy[right_lane_inds], nonzerox[right_lane_inds]] = [0, 0, 255]
+
+        # Draw left line
+        for x, y in zip(left_fitx, ploty):
+            out_img[int(y), int(x)] = [255, 255, 0]
+
+        # Draw left line
+        for x, y in zip(right_fitx, ploty):
+            out_img[int(y), int(x)] = [255, 255, 0]
+
+        # Define y-value where we want radius of curvature
+        y_eval = np.max(ploty)
+
+        # Define conversions in x and y from pixels space to meters
+        ym_per_pix = 30/720 # meters per pixel in y dimension
+        xm_per_pix = 3.7/700 # meters per pixel in x dimension
+
+        # Fit new polynomials to x,y in world space
+        left_fit_cr = np.polyfit(lefty*ym_per_pix, leftx*xm_per_pix, 2)
+        right_fit_cr = np.polyfit(righty*ym_per_pix, rightx*xm_per_pix, 2)
+        # Calculate the new radii of curvature
+        left_curverad = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / np.absolute(2*left_fit_cr[0])
+        right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
+        # Now our radius of curvature is in meters
+        cv2.putText(out_img,'Left curverad:  {:4d}m'.format(np.int(left_curverad)),(10,30), cv2.FONT_HERSHEY_SIMPLEX, 1,(255,165,0),2,cv2.LINE_AA)
+        cv2.putText(out_img,'Right curverad: {:4d}m'.format(np.int(right_curverad)),(10,70), cv2.FONT_HERSHEY_SIMPLEX, 1,(255,165,0),2,cv2.LINE_AA)
+        cv2.putText(out_img,'Diff. curverad: {:4d}m'.format(np.abs(np.int(left_curverad) - np.int(right_curverad))),(10,110), cv2.FONT_HERSHEY_SIMPLEX, 1,(255,165,0),2,cv2.LINE_AA)
+
+        found_lanes_frames.append(out_img)
+
+        # Update Progress Bar
+        printProgressBar(i+1, len_bin_frames, 'Finding lane frames')
+
+    return found_lanes_frames
 
 def save_frames_to_video(frames, fps, output_path = "output.mp4"):
     from moviepy.editor import ImageSequenceClip
@@ -191,8 +324,8 @@ mtx, dist = calc_distortion(debug = False)
 frames, fps = load_frames("project_video.mp4", end_frame = 25 * 2)
 #frames, fps = load_frames("project_video.mp4", start_frame = 25 * 15, end_frame = 25 * 17)
 undistorted_frames = undistort_frames(frames)
-clr_gradient_frames = color_gradient_frames(undistorted_frames)
+clr_gradient_bin_frames, clr_gradient_frames = color_gradient_frames(undistorted_frames)
 M, width, height, src = get_perspective_transform()
-brd_eye_frames = birds_eye_frames(clr_gradient_frames, M, width, height, src)
-
-save_frames_to_video(brd_eye_frames, fps, "output.mp4")
+brd_eye_bin_frames, brd_eye_frames = birds_eye_frames(clr_gradient_bin_frames, clr_gradient_frames, M, width, height, src)
+found_lanes_frames = find_lanes(brd_eye_bin_frames)
+save_frames_to_video(found_lanes_frames, fps, "output.mp4")
