@@ -156,51 +156,56 @@ def get_perspective_transform(height = 720, width = 1280):
     M = cv2.getPerspectiveTransform(np.float32(src), dst)
     return M, width, height, src
 
-def birds_eye_frames(bin_frames, frames, M, width, height, src):
+def birds_eye_frames(bin_frames, M, width, height, src):
     import cv2
     import numpy as np
     from util import printProgressBar
 
     birds_eye_bin_frames = []
-    birds_eye_frames = []
+    #birds_eye_frames = []
     len_frames = len(frames)
     # Initial call to print 0% progress
     printProgressBar(0, len_frames, 'Birds eye frames')
 
     for i in range(len_frames):
         bin_frame = bin_frames[i]
-        frame = frames[i]
+        #frame = frames[i]
 
         # Draw red rectangle on frame to show src for transformation
-        pts = np.array(src, np.int32)
-        pts = pts.reshape((-1,1,2))
-        cv2.polylines(frame,[pts],True,(255,0,0))
-        birds_eye_frames.append(frame)
+        #pts = np.array(src, np.int32)
+        #pts = pts.reshape((-1,1,2))
+        #cv2.polylines(frame,[pts],True,(255,0,0))
+        #birds_eye_frames.append(frame)
 
         # Use cv2.warpPerspective() to warp the image to a top-down view
         birds_eye_bin_frame = cv2.warpPerspective(bin_frame, M, (width, height))
         birds_eye_bin_frames.append(birds_eye_bin_frame)
-        birds_eye_frame = cv2.warpPerspective(frame, M, (width, height))
-        birds_eye_frames.append(birds_eye_frame)
+        #birds_eye_frame = cv2.warpPerspective(frame, M, (width, height))
+        #birds_eye_frames.append(birds_eye_frame)
 
         # Update Progress Bar
         printProgressBar(i+1, len_frames, 'Birds eye frames')
 
-    return birds_eye_bin_frames, birds_eye_frames
+    return birds_eye_bin_frames#, birds_eye_frames
 
-def find_lanes(bin_frames):
+def find_draw_lanes(bin_frames, frames, M):
     from util import printProgressBar
     import numpy as np
     import cv2
 
     found_lanes_frames = []
+    drawed_lanes_frames = []
+
+    # Inverted M to transform image backwards
+    Minv = np.linalg.inv(M)
 
     len_bin_frames = len(bin_frames)
     # Initial call to print 0% progress
-    printProgressBar(0, len_bin_frames, 'Finding lane frames')
+    printProgressBar(0, len_bin_frames, 'Finding & drawing lane frames')
 
     for i in range(len_bin_frames):
         bin_frame = bin_frames[i]
+        frame = frames[i]
 
         # Assuming you have created a warped binary image called "bin_frame"
         # Take a histogram of the bottom half of the image
@@ -310,10 +315,28 @@ def find_lanes(bin_frames):
 
         found_lanes_frames.append(out_img)
 
-        # Update Progress Bar
-        printProgressBar(i+1, len_bin_frames, 'Finding lane frames')
+        # Create an image to draw the lines on
+        warp_zero = np.zeros_like(frame).astype(np.uint8)
+        color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
 
-    return found_lanes_frames
+        # Recast the x and y points into usable format for cv2.fillPoly()
+        pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
+        pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
+        pts = np.hstack((pts_left, pts_right))
+
+        # Draw the lane onto the warped blank image
+        cv2.fillPoly(warp_zero, np.int_([pts]), (0,255, 0))
+
+        # Warp the blank back to original image space using inverse perspective matrix (Minv)
+        newwarp = cv2.warpPerspective(warp_zero, Minv, (frame.shape[1], frame.shape[0]))
+        # Combine the result with the original image
+        result = cv2.addWeighted(frame, 1, newwarp, 0.3, 0)
+        drawed_lanes_frames.append(result)
+
+        # Update Progress Bar
+        printProgressBar(i+1, len_bin_frames, 'Finding & drawing lane frames')
+
+    return found_lanes_frames, drawed_lanes_frames
 
 def save_frames_to_video(frames, fps, output_path = "output.mp4"):
     from moviepy.editor import ImageSequenceClip
@@ -321,11 +344,12 @@ def save_frames_to_video(frames, fps, output_path = "output.mp4"):
     clip.write_videofile(output_path, audio=False)
 
 mtx, dist = calc_distortion(debug = False)
-frames, fps = load_frames("project_video.mp4", end_frame = 25 * 2)
+frames, fps = load_frames("project_video.mp4")
+#frames, fps = load_frames("project_video.mp4", end_frame = 25 * 15)
 #frames, fps = load_frames("project_video.mp4", start_frame = 25 * 15, end_frame = 25 * 17)
 undistorted_frames = undistort_frames(frames)
 clr_gradient_bin_frames, clr_gradient_frames = color_gradient_frames(undistorted_frames)
 M, width, height, src = get_perspective_transform()
-brd_eye_bin_frames, brd_eye_frames = birds_eye_frames(clr_gradient_bin_frames, clr_gradient_frames, M, width, height, src)
-found_lanes_frames = find_lanes(brd_eye_bin_frames)
-save_frames_to_video(found_lanes_frames, fps, "output.mp4")
+brd_eye_bin_frames = birds_eye_frames(clr_gradient_bin_frames, M, width, height, src)
+found_lanes_frames, drawed_lanes_frames = find_draw_lanes(brd_eye_bin_frames, frames, M)
+save_frames_to_video(drawed_lanes_frames, fps, "output.mp4")
