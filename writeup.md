@@ -126,6 +126,8 @@ For the curverad calculation you find this code in function `find_draw_lanes` at
 
 For the center of the car calculation you find this code in function `find_draw_lanes` at lines #344 through #354x of `./pipeline.py`.
 
+To make a smother lane we take the mean of the last n found lines and calculate a mean over it when we add the newest line. Checkout code from `pipeline.py` at line #289 through #293 and in `line.py` at line #29 through #34. Then we use this calculated mean from the class `Line` as `best_fit` in `pipeline.py` at line #327 through #328.
+
 #### 6. Provide an example image of your result plotted back down onto the road such that the lane area is identified clearly.
 
 The most important step is to draw the lane and then warp it into the perspective of the original. We achieve this by inverting the `M` we calculated before and then use `cv2.warpPerspective`. Then we use a little weighted merging to have a transparent effect of our line drawn on the original.
