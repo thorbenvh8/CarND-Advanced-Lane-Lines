@@ -1,3 +1,5 @@
+import numpy as np
+
 # Define a class to receive the characteristics of each line detection
 class Line():
     def __init__(self):
@@ -21,3 +23,12 @@ class Line():
         self.allx = None
         #y values for detected line pixels
         self.ally = None
+        #n iterations
+        self.n = 10
+
+    def addXfitted(self, xfitted):
+        self.recent_xfitted.append(xfitted)
+        if len(self.recent_xfitted) > self.n:
+            self.recent_xfitted.pop(0)
+
+        self.best_fit = np.mean(self.recent_xfitted, axis = 0)

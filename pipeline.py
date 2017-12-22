@@ -138,8 +138,8 @@ def get_perspective_transform(height = 720, width = 1280):
     import cv2
 
     # Source points - defined area of lane line edges
-    src_offset_width_bottom = 235 - 300
-    src_offset_width_top = 45 + 30
+    src_offset_width_bottom = -65
+    src_offset_width_top = 75
     src_offset_height = 90
     bottom_left = [src_offset_width_bottom, height]
     bottom_right = [width - src_offset_width_bottom + 100, height]
@@ -169,6 +169,7 @@ def birds_eye_frames(bin_frames, M, width, height, src):
 
     for i in range(len_frames):
         bin_frame = bin_frames[i]
+        ### outcommented but used for debugging
         #frame = frames[i]
 
         # Draw red rectangle on frame to show src for transformation
@@ -192,9 +193,14 @@ def find_draw_lanes(bin_frames, frames, M):
     from util import printProgressBar
     import numpy as np
     import cv2
+    from line import Line
 
     found_lanes_frames = []
     drawed_lanes_frames = []
+
+    # Left and right line
+    left_line = Line()
+    right_line = Line()
 
     # Inverted M to transform image backwards
     Minv = np.linalg.inv(M)
@@ -217,7 +223,7 @@ def find_draw_lanes(bin_frames, frames, M):
         midpoint = np.int(histogram.shape[0]/2)
         # Same offset we use in the dst for M, only look for the line in the transformed area
         offset = 300
-        leftx_base = np.argmax(histogram[offset:midpoint]) + offset
+        left_line.all_x_base = np.argmax(histogram[offset:midpoint]) + offset
         rightx_base = np.argmax(histogram[midpoint:histogram.shape[0]-offset]) + midpoint
         # Choose the number of sliding windows
         nwindows = 9
@@ -228,7 +234,7 @@ def find_draw_lanes(bin_frames, frames, M):
         nonzeroy = np.array(nonzero[0])
         nonzerox = np.array(nonzero[1])
         # Current positions to be updated for each window
-        leftx_current = leftx_base
+        left_line.all_x_current = left_line.all_x_base
         rightx_current = rightx_base
         # Set the width of the windows +/- margin
         margin = 100
@@ -243,8 +249,8 @@ def find_draw_lanes(bin_frames, frames, M):
             # Identify window boundaries in x and y (and right and left)
             win_y_low = bin_frame.shape[0] - (window+1)*window_height
             win_y_high = bin_frame.shape[0] - window*window_height
-            win_xleft_low = leftx_current - margin
-            win_xleft_high = leftx_current + margin
+            win_xleft_low = left_line.all_x_current - margin
+            win_xleft_high = left_line.all_x_current + margin
             win_xright_low = rightx_current - margin
             win_xright_high = rightx_current + margin
             # Draw the windows on the visualization image
@@ -262,7 +268,7 @@ def find_draw_lanes(bin_frames, frames, M):
             right_lane_inds.append(good_right_inds)
             # If you found > minpix pixels, recenter next window on their mean position
             if len(good_left_inds) > minpix:
-                leftx_current = np.int(np.mean(nonzerox[good_left_inds]))
+                left_line.all_x_current = np.int(np.mean(nonzerox[good_left_inds]))
             if len(good_right_inds) > minpix:
                 rightx_current = np.int(np.mean(nonzerox[good_right_inds]))
 
@@ -271,28 +277,30 @@ def find_draw_lanes(bin_frames, frames, M):
         right_lane_inds = np.concatenate(right_lane_inds)
 
         # Extract left and right line pixel positions
-        leftx = nonzerox[left_lane_inds]
-        lefty = nonzeroy[left_lane_inds]
+        left_line.all_x = nonzerox[left_lane_inds]
+        left_line.all_y = nonzeroy[left_lane_inds]
         rightx = nonzerox[right_lane_inds]
         righty = nonzeroy[right_lane_inds]
 
         # Fit a second order polynomial to each
-        left_fit = np.polyfit(lefty, leftx, 2)
+        left_fit = np.polyfit(left_line.all_y, left_line.all_x, 2)
         right_fit = np.polyfit(righty, rightx, 2)
 
         ploty = np.linspace(0, bin_frame.shape[0]-1, bin_frame.shape[0] )
         left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
+        left_line.addXfitted(left_fitx)
         right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
+        right_line.addXfitted(right_fitx)
 
         out_img[nonzeroy[left_lane_inds], nonzerox[left_lane_inds]] = [255, 0, 0]
         out_img[nonzeroy[right_lane_inds], nonzerox[right_lane_inds]] = [0, 0, 255]
 
         # Draw left line
-        for x, y in zip(left_fitx, ploty):
+        for x, y in zip(left_line.best_fit, ploty):
             out_img[int(y), int(x)] = [255, 255, 0]
 
         # Draw left line
-        for x, y in zip(right_fitx, ploty):
+        for x, y in zip(right_line.best_fit, ploty):
             out_img[int(y), int(x)] = [255, 255, 0]
 
         # Define y-value where we want radius of curvature
@@ -303,15 +311,11 @@ def find_draw_lanes(bin_frames, frames, M):
         xm_per_pix = 3.7/700 # meters per pixel in x dimension
 
         # Fit new polynomials to x,y in world space
-        left_fit_cr = np.polyfit(lefty*ym_per_pix, leftx*xm_per_pix, 2)
+        left_fit_cr = np.polyfit(left_line.all_y*ym_per_pix, left_line.all_x*xm_per_pix, 2)
         right_fit_cr = np.polyfit(righty*ym_per_pix, rightx*xm_per_pix, 2)
         # Calculate the new radii of curvature
-        left_curverad = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / np.absolute(2*left_fit_cr[0])
-        right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
-        # Now our radius of curvature is in meters
-        cv2.putText(out_img,'Left curverad:  {:4d}m'.format(np.int(left_curverad)),(10,30), cv2.FONT_HERSHEY_SIMPLEX, 1,(255,165,0),2,cv2.LINE_AA)
-        cv2.putText(out_img,'Right curverad: {:4d}m'.format(np.int(right_curverad)),(10,70), cv2.FONT_HERSHEY_SIMPLEX, 1,(255,165,0),2,cv2.LINE_AA)
-        cv2.putText(out_img,'Diff. curverad: {:4d}m'.format(np.abs(np.int(left_curverad) - np.int(right_curverad))),(10,110), cv2.FONT_HERSHEY_SIMPLEX, 1,(255,165,0),2,cv2.LINE_AA)
+        left_line.radius_of_curvature = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / np.absolute(2*left_fit_cr[0])
+        right_line.radius_of_curvature = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
 
         found_lanes_frames.append(out_img)
 
@@ -320,8 +324,8 @@ def find_draw_lanes(bin_frames, frames, M):
         color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
 
         # Recast the x and y points into usable format for cv2.fillPoly()
-        pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
-        pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
+        pts_left = np.array([np.transpose(np.vstack([left_line.best_fit, ploty]))])
+        pts_right = np.array([np.flipud(np.transpose(np.vstack([right_line.best_fit, ploty])))])
         pts = np.hstack((pts_left, pts_right))
 
         # Draw the lane onto the warped blank image
@@ -331,6 +335,24 @@ def find_draw_lanes(bin_frames, frames, M):
         newwarp = cv2.warpPerspective(warp_zero, Minv, (frame.shape[1], frame.shape[0]))
         # Combine the result with the original image
         result = cv2.addWeighted(frame, 1, newwarp, 0.3, 0)
+
+        # Draw our radius of curvature is in meters on the result
+        cv2.putText(result,'Left curverad:  {:5d}m'.format(np.int(left_line.radius_of_curvature)),(10,30), cv2.FONT_HERSHEY_SIMPLEX, 1,(255,165,0),2,cv2.LINE_AA)
+        cv2.putText(result,'Right curverad: {:5d}m'.format(np.int(right_line.radius_of_curvature)),(10,70), cv2.FONT_HERSHEY_SIMPLEX, 1,(255,165,0),2,cv2.LINE_AA)
+        cv2.putText(result,'Diff. curverad: {:5d}m'.format(np.abs(np.int(left_line.radius_of_curvature) - np.int(right_line.radius_of_curvature))),(10,110), cv2.FONT_HERSHEY_SIMPLEX, 1,(255,165,0),2,cv2.LINE_AA)
+
+        height = frame.shape[0]
+        width = frame.shape[1]
+        car_position = width/2
+        l_fit_x_int = left_fit[0]*height**2 + left_fit[1]*height + left_fit[2]
+        r_fit_x_int = right_fit[0]*height**2 + right_fit[1]*height + right_fit[2]
+        lane_center_position = (r_fit_x_int + l_fit_x_int) /2
+        center_dist = (car_position - lane_center_position) * xm_per_pix
+        if center_dist < 0:
+            cv2.putText(result,'Vehicle is {0:.2f}m left of center'.format(np.abs(center_dist)),(10,150), cv2.FONT_HERSHEY_SIMPLEX, 1,(255,165,0),2,cv2.LINE_AA)
+        if center_dist > 0:
+            cv2.putText(result,'Vehicle is {0:.2f}m right of center'.format(np.abs(center_dist)),(10,150), cv2.FONT_HERSHEY_SIMPLEX, 1,(255,165,0),2,cv2.LINE_AA)
+
         drawed_lanes_frames.append(result)
 
         # Update Progress Bar
@@ -345,11 +367,11 @@ def save_frames_to_video(frames, fps, output_path = "output.mp4"):
 
 mtx, dist = calc_distortion(debug = False)
 frames, fps = load_frames("project_video.mp4")
-#frames, fps = load_frames("project_video.mp4", end_frame = 25 * 15)
+#frames, fps = load_frames("project_video.mp4", end_frame = 25 * 2)
 #frames, fps = load_frames("project_video.mp4", start_frame = 25 * 15, end_frame = 25 * 17)
 undistorted_frames = undistort_frames(frames)
 clr_gradient_bin_frames, clr_gradient_frames = color_gradient_frames(undistorted_frames)
 M, width, height, src = get_perspective_transform()
 brd_eye_bin_frames = birds_eye_frames(clr_gradient_bin_frames, M, width, height, src)
 found_lanes_frames, drawed_lanes_frames = find_draw_lanes(brd_eye_bin_frames, frames, M)
-save_frames_to_video(drawed_lanes_frames, fps, "output.mp4")
+save_frames_to_video(drawed_lanes_frames, fps, "project_video_output.mp4")
