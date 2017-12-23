@@ -28,7 +28,7 @@ The goals / steps of this project are the following:
 [image5a]: ./writeup/histogram.png "Histogram"
 [image5b]: ./writeup/color_fit_lines.png "Fit Visual"
 [image6]: ./writeup/output.png "Output"
-[video1]: ./project_video.mp4 "Video"
+[video1]: ./project_video_output.mp4 "Video"
 
 ## [Rubric](https://review.udacity.com/#!/rubrics/571/view) Points
 
@@ -61,29 +61,26 @@ I do this in the function `undistort_frames` to each image of the video in line 
 
 #### 2. Describe how (and identify where in your code) you used color transforms, gradients or other methods to create a thresholded binary image.  Provide an example of a binary image result.
 
-I used a combination of color and gradient thresholds to generate a binary image (thresholding steps in function `color_gradient_frames` at lines #94 through #134 in `pipeline.py`).  Here's an example of my output for this step.
+I used a combination of color and gradient thresholds to generate a binary image (thresholding steps in function `color_gradient_frames` at lines #94 through #141 in `pipeline.py`).  Here's an example of my output for this step. For improvement I checked for dark pixels like shadows etc and then removed that from the color and gradient thresholds.
 
 ![alt text][image3]
 
 #### 3. Describe how (and identify where in your code) you performed a perspective transform and provide an example of a transformed image.
 
-The code for my perspective transform includes a function called `get_perspective_transform()`, which appears in lines #136 through #157 in the file `pipeline.py`.  The `get_perspective_transform()` calculates me a `M`for a specific `height` and `width`.  I chose the hardcode the source and destination points in the following manner:
+The code for my perspective transform includes a function called `get_perspective_transform()`, which appears in lines #143 through #161 in the file `pipeline.py`.  The `get_perspective_transform()` calculates me a `M`for a specific `height` and `width`.  I chose the hardcode the source and destination points in the following manner:
 
 ```python
   # Source points - defined area of lane line edges
-  src_offset_width_bottom = -65
-  src_offset_width_top = 75
-  src_offset_height = 90
-  bottom_left = [src_offset_width_bottom, height]
-  bottom_right = [width - src_offset_width_bottom + 100, height]
-  top_right = [width / 2 + src_offset_width_top, height / 2 + src_offset_height]
-  top_left = [width / 2 - src_offset_width_top, height / 2 + src_offset_height]
-  src = [bottom_left, bottom_right, top_right, top_left]
+  src = np.float32([[545, 460],
+                    [735, 460],
+                    [1280, 700],
+                    [0, 700]])
 
   # 4 destination points to transfer
-  offset = 300 # offset for dst points
-  dst = np.float32([[offset, height],[width-offset, height],
-                    [width-offset, 0],[offset, 0]])
+  dst = np.float32([[0, 0],
+                    [1280, 0],
+                    [1280, 720],
+                    [0, 720]])
 ```
 
 This resulted in the following source and destination points:
@@ -102,7 +99,7 @@ I verified that my perspective transform was working as expected by drawing the 
 
 #### 4. Describe how (and identify where in your code) you identified lane-line pixels and fit their positions with a polynomial?
 
-Then I did an histogram over the warped image to check for the sum from the bottom to the half of the screen. So from the closest to the car to half through the image height. The maximums of the histogram could be a potential line. We only search from the half and the offset we set when we warped the image.
+Then I did an histogram over the warped image to check for the sum from the bottom to three quarters of the screen. So from the closest to the car to half through the image height. The maximums of the histogram could be a potential line. We only search from the half and the offset we set when we warped the image.
 
 ![alt text][image5a]
 
@@ -110,7 +107,7 @@ From this starting point we create windows (in my case 9) to search for the line
 We identify the nonzero pixels in the window and if we found more on the left side then the right side of the window we shift the next window on top to the mean of pixels. So the window moves to the left or to the right when its a curve etc to identify the line.
 From the identified line we calculate the curvade of each left and right lane.
 
-You find this code in function `find_draw_lanes` at lines #195 through #307 of `./pipeline.py`.
+You find this code in function `find_draw_lanes` at lines #196 through #312 of `./pipeline.py`.
 
 ![alt text][image5b]
 
@@ -122,17 +119,17 @@ I assume in my code the following ratio from pixel to meter:
   ym_per_pix = 30/720 # meters per pixel in y dimension
   xm_per_pix = 3.7/700 # meters per pixel in x dimension
 ```
-For the curverad calculation you find this code in function `find_draw_lanes` at lines #309 through #321 of `./pipeline.py`.
+For the curverad calculation you find this code in function `find_draw_lanes` at lines #314 through #326 of `./pipeline.py`.
 
-For the center of the car calculation you find this code in function `find_draw_lanes` at lines #344 through #354x of `./pipeline.py`.
+For the center of the car calculation you find this code in function `find_draw_lanes` at lines #352 through #362 of `./pipeline.py`.
 
-To make a smother lane we take the mean of the last n found lines and calculate a mean over it when we add the newest line. Checkout code from `pipeline.py` at line #289 through #293 and in `line.py` at line #29 through #34. Then we use this calculated mean from the class `Line` as `best_fit` in `pipeline.py` at line #327 through #328.
+To make a smother lane we take the mean of the last n found lines and calculate a mean over it when we add the newest line. Checkout code from `pipeline.py` at line #291 through #295 and in `line.py` at line #29 through #34 (My algorithm runs so smoothly now, I set n to 1 for now). Then we use this calculated mean from the class `Line` as `best_fit` in `pipeline.py` at line #327 through #328.
 
 #### 6. Provide an example image of your result plotted back down onto the road such that the lane area is identified clearly.
 
 The most important step is to draw the lane and then warp it into the perspective of the original. We achieve this by inverting the `M` we calculated before and then use `cv2.warpPerspective`. Then we use a little weighted merging to have a transparent effect of our line drawn on the original.
 
-I implemented this step in lines #325 through #345 in my code in `pipeline.py` in the function `find_draw_lanes()`.  Here is an example of my result on a test image:
+I implemented this step in lines #330 through #350 in my code in `pipeline.py` in the function `find_draw_lanes()`.  Here is an example of my result on a test image:
 
 ![alt text][image6]
 

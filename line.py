@@ -24,7 +24,7 @@ class Line():
         #y values for detected line pixels
         self.ally = None
         #n iterations
-        self.n = 10
+        self.n = 1
 
     def addXfitted(self, xfitted):
         self.recent_xfitted.append(xfitted)

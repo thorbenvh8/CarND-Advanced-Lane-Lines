@@ -91,7 +91,7 @@ def undistort_frames(frames):
         printProgressBar(i+1, len_frames, 'Undistort frames')
     return undistorted_frames
 
-def color_gradient_frames(frames, s_thresh=(125, 255), sx_thresh=(10, 100), sobel_kernel = 3):
+def color_gradient_frames(frames, s_thresh=(125, 255), sx_thresh=(30, 100), sobel_kernel = 3):
     import cv2
     import numpy as np
     from util import printProgressBar
@@ -109,6 +109,13 @@ def color_gradient_frames(frames, s_thresh=(125, 255), sx_thresh=(10, 100), sobe
         l_channel = hls[:,:,1]
         s_channel = hls[:,:,2]
 
+        # Find the dark colors in the image to remove them from s and sx
+        lower = np.array([0,0,0])
+        upper = np.array([50,50,100])
+        mask = cv2.inRange(img, lower, upper)
+        black_binary = np.zeros_like(s_channel)
+        black_binary[(mask > 0)] = 1
+
         # Sobelx - takes the derivate in x, absolute value, then rescale
         sobelx = cv2.Sobel(l_channel, cv2.CV_64F, 1, 0, ksize = sobel_kernel)
         abs_sobelx = np.absolute(sobelx)
@@ -116,11 +123,11 @@ def color_gradient_frames(frames, s_thresh=(125, 255), sx_thresh=(10, 100), sobe
 
         # Threshold x gradient
         sxbinary = np.zeros_like(scaled_sobelx)
-        sxbinary[(scaled_sobelx >= sx_thresh[0]) & (scaled_sobelx <= sx_thresh[1])] = 1
+        sxbinary[(black_binary == 0) & (scaled_sobelx >= sx_thresh[0]) & (scaled_sobelx <= sx_thresh[1])] = 1
 
         # Threshold color channel
         s_binary = np.zeros_like(s_channel)
-        s_binary[(s_channel >= s_thresh[0]) & (s_channel <= s_thresh[1])] = 1
+        s_binary[(black_binary == 0) & (s_channel >= s_thresh[0]) & (s_channel <= s_thresh[1])] = 1
 
         # If two of the three are activated, activate in the binary image
         combined_binary = np.zeros_like(sxbinary)
@@ -138,19 +145,16 @@ def get_perspective_transform(height = 720, width = 1280):
     import cv2
 
     # Source points - defined area of lane line edges
-    src_offset_width_bottom = -65
-    src_offset_width_top = 75
-    src_offset_height = 90
-    bottom_left = [src_offset_width_bottom, height]
-    bottom_right = [width - src_offset_width_bottom + 100, height]
-    top_right = [width / 2 + src_offset_width_top, height / 2 + src_offset_height]
-    top_left = [width / 2 - src_offset_width_top, height / 2 + src_offset_height]
-    src = [bottom_left, bottom_right, top_right, top_left]
+    src = np.float32([[545, 460],
+                      [735, 460],
+                      [1280, 700],
+                      [0, 700]])
 
     # 4 destination points to transfer
-    offset = 300 # offset for dst points
-    dst = np.float32([[offset, height],[width-offset, height],
-                      [width-offset, 0],[offset, 0]])
+    dst = np.float32([[0, 0],
+                      [1280, 0],
+                      [1280, 720],
+                      [0, 720]])
 
     # Use cv2.getPerspectiveTransform() to get M, the transform matrix
     M = cv2.getPerspectiveTransform(np.float32(src), dst)
@@ -220,11 +224,9 @@ def find_draw_lanes(bin_frames, frames, M):
         out_img = np.dstack((bin_frame, bin_frame, bin_frame))*255
         # Find the peak of the left and right halves of the histogram
         # These will be the starting point for the left and right lines
-        midpoint = np.int(histogram.shape[0]/2)
-        # Same offset we use in the dst for M, only look for the line in the transformed area
-        offset = 300
-        left_line.all_x_base = np.argmax(histogram[offset:midpoint]) + offset
-        rightx_base = np.argmax(histogram[midpoint:histogram.shape[0]-offset]) + midpoint
+        midpoint = np.int(histogram.shape[0]*3/4)
+        left_line.all_x_base = np.argmax(histogram[:midpoint])
+        rightx_base = np.argmax(histogram[midpoint:]) + midpoint
         # Choose the number of sliding windows
         nwindows = 9
         # Set height of windows
@@ -297,11 +299,17 @@ def find_draw_lanes(bin_frames, frames, M):
 
         # Draw left line
         for x, y in zip(left_line.best_fit, ploty):
-            out_img[int(y), int(x)] = [255, 255, 0]
+            y = int(y)
+            x = int(x)
+            if (x >= 0 and x < 1280 and y >= 0 and y < 720):
+                out_img[y, x] = [255, 255, 0]
 
         # Draw left line
         for x, y in zip(right_line.best_fit, ploty):
-            out_img[int(y), int(x)] = [255, 255, 0]
+            y = int(y)
+            x = int(x)
+            if (x >= 0 and x < 1280 and y >= 0 and y < 720):
+                out_img[y, x] = [255, 255, 0]
 
         # Define y-value where we want radius of curvature
         y_eval = np.max(ploty)
@@ -368,7 +376,7 @@ def save_frames_to_video(frames, fps, output_path = "output.mp4"):
 mtx, dist = calc_distortion(debug = False)
 frames, fps = load_frames("project_video.mp4")
 #frames, fps = load_frames("project_video.mp4", end_frame = 25 * 2)
-#frames, fps = load_frames("project_video.mp4", start_frame = 25 * 15, end_frame = 25 * 17)
+#frames, fps = load_frames("project_video.mp4", start_frame = 25 * 24, end_frame = 25 * 25)
 undistorted_frames = undistort_frames(frames)
 clr_gradient_bin_frames, clr_gradient_frames = color_gradient_frames(undistorted_frames)
 M, width, height, src = get_perspective_transform()
